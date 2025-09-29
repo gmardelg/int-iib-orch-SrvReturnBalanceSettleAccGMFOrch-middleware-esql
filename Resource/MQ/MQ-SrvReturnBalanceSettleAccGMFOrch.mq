@@ -7,4 +7,4 @@ DEFINE QLOCAL ('MQINP.RTNBALANCESETTLEACC.ORCH.RESP') +
                 BOQNAME('SYSTEM.DEAD.LETTER.QUEUE') +
                 BOTHRESH(1) +
 				MAXDEPTH(5000) +
-                REPLACE
+                REPLACE 
