@@ -1,0 +1,125 @@
+BROKER SCHEMA com.bancopopular.services.orq
+
+
+CREATE COMPUTE MODULE RtnBalanceSettleAccGMF_CmpValidateResponses
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		--Copia cabeceras de mensaje
+		SET OutputRoot.MQMD		  	 = InputRoot.MQMD;
+		SET OutputRoot.MQMD.ReplyToQ = InputRoot.MQRFH2.usr.replyToQOrig;
+		SET OutputRoot.MQRFH2	  	 = InputRoot.MQRFH2;
+		DECLARE refMQRFH2 REFERENCE TO OutputRoot.MQRFH2;
+
+		--Establecer cola de respuesta del componente que responderá a componente Facade
+		SET Environment.MQCmpReplyToFcdWS = refMQRFH2.usr.replyToQOrig;
+
+		--Referencia a mensaje de respuesta de Back-end
+		DECLARE refRsInp REFERENCE TO InputRoot.XMLNSC;
+		MOVE refRsInp LASTCHILD;
+		MOVE refRsInp LASTCHILD;
+
+		--Variables de uso interno
+		DECLARE encod 		 INTEGER COALESCE(InputRoot.Properties.Encoding, InputRoot.MQMD.Encoding, 273);
+		DECLARE ccidv 		 INTEGER COALESCE(InputRoot.Properties.CodedCharSetId, InputRoot.MQMD.CodedCharSetId, 819);		
+		DECLARE refMsgOrg    REFERENCE TO refMQRFH2.usr.XML;
+		DECLARE Concep    	REFERENCE TO refMQRFH2.usr.XML.*:addRtnBcSettleAccGMFRequest.*:RtnBcSettleAccGMFRq.*:ProductId.*:Concept;
+		DECLARE ScnRs    	REFERENCE TO refRsInp.*:Status.*:StatusCode;
+		DECLARE Intento  	REFERENCE TO refMQRFH2.usr.RevInt;
+		DECLARE Result    	REFERENCE TO refMQRFH2.usr.Result;
+		DECLARE operation   CHARACTER COALESCE(refMQRFH2.usr.operation, '');
+		
+
+		--Valida respuesta de cada llamado
+		IF operation <> NULL OR operation <> '' THEN
+			IF operation = 'CreateTransaction' THEN
+				IF (Concep = 'DD') AND (Result = 'SUCCESS') THEN
+					--Establece parámetros para enviar a servicio de Actualizar Pago en AST
+					SET refMQRFH2.usr.service = refMQRFH2.usr.serviceOrig.poscall;	
+					--Envia mensaje a segundo servicio (callUpdPayAST)
+					SET OutputRoot.XMLNSC = refMsgOrg;
+					SET refMQRFH2.usr.Result    = NULL;
+					SET refMQRFH2.usr.operation = NULL;
+					SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = refMQRFH2.usr.service.queueName;
+					PROPAGATE TO TERMINAL 'out' DELETE NONE;
+					SET OutputRoot.XMLNSC = NULL;					
+				ELSEIF (Concep = 'DD') AND (Result = 'FAILURE') AND (ScnRs ='91') THEN
+					--Establece parámetros para enviar a servicio de reverso en FC
+					SET refMQRFH2.usr.service = refMQRFH2.usr.serviceOrig.callOnlFcRev;	
+					--Envia mensaje a servicio (Reverso)
+					SET OutputRoot.XMLNSC = refMsgOrg;
+					SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = refMQRFH2.usr.service.queueName;
+					PROPAGATE TO TERMINAL 'out' DELETE NONE;
+					SET OutputRoot.XMLNSC = NULL;							
+				ELSEIF (Result = 'SUCCESS') OR (Result <> 'SUCCESS') THEN
+					--Establece mensaje de respuesta
+					SET OutputRoot.XMLNSC = InputRoot.XMLNSC;				
+					--Envía mensaje de error/excepcion a componente Facade
+					SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = Environment.MQCmpReplyToFcdWS;
+					PROPAGATE TO TERMINAL 'out' DELETE NONE;
+					SET OutputRoot.XMLNSC = NULL;				
+				END IF;
+			ELSEIF operation = 'ReturnBalanceSettleAccGMFAST' THEN
+				IF (Result = '0') THEN
+					SET OutputRoot.XMLNSC = InputRoot.XMLNSC;				
+					--Envía mensaje de error/excepcion a componente Facade
+					SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = Environment.MQCmpReplyToFcdWS;
+					SET refMQRFH2.usr.Result    = NULL;
+					SET refMQRFH2.usr.operation = NULL;
+					PROPAGATE TO TERMINAL 'out' DELETE NONE;
+					SET OutputRoot.XMLNSC = NULL;
+				ELSE
+					--Establece parámetros para enviar a servicio de reverso en FC
+					SET refMQRFH2.usr.service = refMQRFH2.usr.serviceOrig.callOnlFcRev;	
+					--Envia mensaje a servicio (Reverso)
+					SET OutputRoot.XMLNSC = refMsgOrg;
+					SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = refMQRFH2.usr.service.queueName;
+					SET refMQRFH2.usr.Result    = NULL;
+					SET refMQRFH2.usr.operation = NULL;
+					PROPAGATE TO TERMINAL 'out' DELETE NONE;					
+				END IF;
+			ELSEIF operation = 'ReverseTransaction' THEN
+				SET OutputRoot.XMLNSC = InputRoot.XMLNSC;				
+				--Envía mensaje a componente Facade
+				SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = Environment.MQCmpReplyToFcdWS;
+				SET refMQRFH2.usr.Result    = NULL;
+				SET refMQRFH2.usr.operation = NULL;
+				PROPAGATE TO TERMINAL 'out' DELETE NONE;
+				SET OutputRoot.XMLNSC = NULL;
+			END IF;	
+		ELSEIF (operation = NULL) OR (operation = '') THEN 
+			IF (Concep = 'SE') AND (ScnRs = '300') THEN
+				SET OutputRoot.XMLNSC = InputRoot.XMLNSC;				
+				--Envía mensaje a componente Facade
+				SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = Environment.MQCmpReplyToFcdWS;
+				SET refMQRFH2.usr.Result    = NULL;
+				SET refMQRFH2.usr.operation = NULL;
+				PROPAGATE TO TERMINAL 'out' DELETE NONE;
+				SET OutputRoot.XMLNSC = NULL;
+			ELSEIF (Concep = 'DD') AND (Intento = '1') THEN
+				SET OutputRoot.XMLNSC = InputRoot.XMLNSC;				
+				--Envía mensaje a componente Facade
+				SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = Environment.MQCmpReplyToFcdWS;
+				SET refMQRFH2.usr.Result    = NULL;
+				SET refMQRFH2.usr.operation = NULL;
+				PROPAGATE TO TERMINAL 'out' DELETE NONE;
+				SET OutputRoot.XMLNSC = NULL;	
+			ELSEIF (ScnRs = '100') THEN
+				SET OutputRoot.XMLNSC = InputRoot.XMLNSC;				
+				--Envía mensaje a componente Facade
+				SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = Environment.MQCmpReplyToFcdWS;
+				SET refMQRFH2.usr.Result    = NULL;
+				SET refMQRFH2.usr.operation = NULL;
+				PROPAGATE TO TERMINAL 'out' DELETE NONE;
+			ELSE
+				--Establece parámetros para enviar a servicio de reverso en FC
+				SET refMQRFH2.usr.service = refMQRFH2.usr.serviceOrig.callOnlFcRev;	
+				--Envia mensaje a servicio (Reverso)
+				SET OutputRoot.XMLNSC = refMsgOrg;
+				SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = refMQRFH2.usr.service.queueName;
+				PROPAGATE TO TERMINAL 'out' DELETE NONE;
+				SET OutputRoot.XMLNSC = NULL;
+			END IF;				
+		END IF;				
+		RETURN FALSE;
+	END;
+END MODULE;

@@ -1,0 +1,31 @@
+BROKER SCHEMA com.bancopopular.services.orq
+
+
+CREATE COMPUTE MODULE RtnBalanceSettleAccGMF_CmpCreateSendMsgsRq
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		SET OutputRoot = InputRoot;
+		SET OutputRoot.MQMD.CorrelId = InputRoot.MQMD.MsgId;
+		DECLARE refMQRFH2 REFERENCE TO OutputRoot.MQRFH2;
+		
+		--Establece ReplyToQueue Original
+		SET refMQRFH2.usr.replyToQOrig = TRIM(InputRoot.MQMD.ReplyToQ);
+		
+		--Establecer cola de respuesta del componente que responderá a la fachada
+		SET Environment.MQCmpReplyToFcdWS = TRIM(InputRoot.MQMD.ReplyToQ);
+
+		--Copia Environment Local
+		SET OutputLocalEnvironment = InputLocalEnvironment;
+		
+		--Almacena mensaje request
+		SET refMQRFH2.usr.XML = InputRoot.XMLNSC;
+		
+		--Almacena información de servicios a consumir
+		SET refMQRFH2.usr.serviceOrig = refMQRFH2.usr.service;
+		
+		--Envía mensaje a cola de servicio específico/atómico de precall
+		SET refMQRFH2.usr.service = refMQRFH2.usr.service.precall;
+		SET OutputLocalEnvironment.Destination.MQ.DestinationData[1].queueName = refMQRFH2.usr.service.queueName;
+		RETURN TRUE;
+	END;
+END MODULE;
